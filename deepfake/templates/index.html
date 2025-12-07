@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realitycheck - Image Authenticity Scanner</title>
+
+    <style>
+        :root {
+            --bg-main: #050816;
+            --primary: #2563eb;
+            --accent: #f97316;
+            --text-main: #e5e7eb;
+            --text-muted: #9ca3af;
+            --card-bg: #020617;
+            --card-border: #1f2937;
+            --radius-lg: 1.2rem;
+            --shadow-soft: 0 18px 45px rgba(3,7,18,0.7);
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', sans-serif;
+            background: var(--bg-main);
+            color: var(--text-main);
+            overflow-x: hidden;
+        }
+
+        /* Background Animation Canvas */
+        #bg-canvas {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+        }
+
+        /* Center Container */
+        .scanner-container {
+            max-width: 500px;
+            margin: 120px auto;
+            background: var(--card-bg);
+            padding: 2rem;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--card-border);
+            box-shadow: var(--shadow-soft);
+            text-align: center;
+            animation: fadeIn 0.6s ease;
+        }
+
+        h1 {
+            margin-bottom: 1rem;
+            font-size: 1.9rem;
+            font-weight: 700;
+            color: #f9fafb;
+        }
+
+        p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-bottom: 1.8rem;
+        }
+
+        input[type=file] {
+            margin: 1rem 0;
+            padding: 0.7rem;
+            width: 100%;
+            background: transparent;
+            color: var(--text-main);
+            border: 1px solid #334155;
+            border-radius: 0.6rem;
+        }
+
+        button {
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            padding: 0.8rem 1.8rem;
+            font-size: 1rem;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: 0.2s ease;
+            box-shadow: 0 14px 35px rgba(37, 99, 235, 0.45);
+        }
+
+        button:hover {
+            background: #1d4ed8;
+            transform: translateY(-2px);
+        }
+
+        /* Preview image */
+        .preview-image {
+            width: 100%;
+            margin-top: 1rem;
+            border-radius: 0.8rem;
+            border: 1px solid #1f2937;
+            display: none;
+        }
+
+        /* Prediction Box */
+        .result-box {
+            margin-top: 1.8rem;
+            padding: 1rem;
+            border-radius: 0.8rem;
+            border: 1px solid var(--card-border);
+            background: #010410;
+            box-shadow: 0 0 20px rgba(37, 99, 235, 0.25);
+            font-size: 1.2rem;
+        }
+
+        @keyframes fadeIn {
+            from {opacity: 0; transform: translateY(20px);}
+            to {opacity: 1; transform: translateY(0);}
+        }
+    </style>
+</head>
+
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<div class="scanner-container">
+    <h1>Realitycheck Scanner</h1>
+    <p>Upload an image to detect if it's AI-generated or Real.</p>
+
+    <input type="file" id="imageInput" accept="image/*">
+    <img id="preview" class="preview-image">
+
+    <button id="scanBtn">Scan Image</button>
+
+    <div id="result" class="result-box" style="display:none;"></div>
+</div>
+
+
+<!-- AJAX + Preview Script -->
+<script>
+document.getElementById("imageInput").addEventListener("change", function () {
+    const file = this.files[0];
+    const preview = document.getElementById("preview");
+
+    if (file) {
+        preview.src = URL.createObjectURL(file);
+        preview.style.display = "block";
+    }
+});
+
+document.getElementById("scanBtn").addEventListener("click", async function () {
+    const fileInput = document.getElementById("imageInput");
+    const resultBox = document.getElementById("result");
+
+    if (fileInput.files.length === 0) {
+        alert("Please select an image first.");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("image", fileInput.files[0]);
+
+    resultBox.style.display = "block";
+    resultBox.innerHTML = "Scanning...";
+
+    const res = await fetch("/predict", {
+        method: "POST",
+        body: formData
+    });
+
+    const data = await res.json();
+    resultBox.innerHTML = "Result: <b>" + data.prediction + "</b>";
+});
+</script>
+
+
+<!-- Background Animation Script -->
+<script>
+const canvas = document.getElementById("bg-canvas");
+const ctx = canvas.getContext("2d");
+let points = [];
+
+function resize() {
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+}
+resize();
+window.onresize = resize;
+
+function initPoints() {
+    points = [];
+    for (let i = 0; i < 40; i++) {
+        points.push({
+            x: Math.random() * innerWidth,
+            y: Math.random() * innerHeight,
+            vx: (Math.random() - 0.5) * 0.3,
+            vy: (Math.random() - 0.5) * 0.3
+        });
+    }
+}
+initPoints();
+
+function animate() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw connecting lines
+    points.forEach((p1, i) => {
+        points.slice(i+1).forEach(p2 => {
+            const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+            if (dist < 140) {
+                ctx.strokeStyle = `rgba(37, 99, 235, ${1 - dist/140})`;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+            }
+        });
+    });
+
+    // Draw points
+    points.forEach(p => {
+        ctx.fillStyle = "#38bdf8";
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        p.x += p.vx;
+        p.y += p.vy;
+
+        if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+        if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+    });
+
+    requestAnimationFrame(animate);
+}
+animate();
+</script>
+
+</body>
+</html>

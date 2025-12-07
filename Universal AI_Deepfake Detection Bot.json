@@ -1,0 +1,810 @@
+{
+  "name": "Universal AI/Deepfake Detection Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "edited_message",
+          "channel_post",
+          "edited_channel_post"
+        ],
+        "additionalFields": {
+          "download": true,
+          "imageSize": "medium"
+        }
+      },
+      "id": "a4c9aff4-42af-4c74-b208-6e6f0a3a7941",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        384,
+        336
+      ],
+      "webhookId": "telegram-bot-webhook",
+      "credentials": {
+        "telegramApi": {
+          "id": "ztKG5bDof5XKhIbF",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const platformData = $input.all();\nconst normalized = [];\n\nfor (const item of platformData) {\n  const data = item.json;\n  let standardized = {};\n\n  // Telegram normalization\n  if (data.message && data.message.chat) {\n    const msg = data.message;\n    const hasPhoto = msg.photo && msg.photo.length > 0;\n    const hasVideo = msg.video;\n    \n    standardized = {\n      platform: 'telegram',\n      user_id: msg.from.id.toString(),\n      chat_id: msg.chat.id.toString(),\n      media_type: hasPhoto ? 'image' : (hasVideo ? 'video' : 'unknown'),\n      media_identifier: hasPhoto ? msg.photo[msg.photo.length - 1].file_id : (hasVideo ? msg.video.file_id : null),\n      username: msg.from.username || msg.from.first_name || 'Unknown',\n      timestamp: msg.date,\n      download_method: 'telegram_getFile',\n      message_id: msg.message_id\n    };\n  }\n  // WhatsApp normalization\n  else if (data.entry && data.entry[0] && data.entry[0].changes) {\n    const change = data.entry[0].changes[0].value;\n    const message = change.messages ? change.messages[0] : null;\n    \n    if (message) {\n      standardized = {\n        platform: 'whatsapp',\n        user_id: message.from,\n        chat_id: message.from,\n        media_type: message.type === 'image' ? 'image' : (message.type === 'video' ? 'video' : 'unknown'),\n        media_identifier: message.image ? message.image.id : (message.video ? message.video.id : null),\n        username: message.from,\n        timestamp: message.timestamp,\n        download_method: 'whatsapp_getMedia',\n        message_id: message.id\n      };\n    }\n  }\n  // Discord normalization\n  else if (data.author && data.attachments) {\n    const attachment = data.attachments[0];\n    const isImage = attachment.content_type && attachment.content_type.includes('image');\n    const isVideo = attachment.content_type && attachment.content_type.includes('video');\n    \n    standardized = {\n      platform: 'discord',\n      user_id: data.author.id,\n      chat_id: data.channel_id,\n      media_type: isImage ? 'image' : (isVideo ? 'video' : 'unknown'),\n      media_identifier: attachment.url,\n      username: data.author.username,\n      timestamp: data.timestamp,\n      download_method: 'direct_url',\n      message_id: data.id\n    };\n  }\n\n  // Add universal metadata\n  if (standardized.platform) {\n    standardized.processing_id = `${standardized.platform}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;\n    standardized.status = 'pending';\n    standardized.received_at = new Date().toISOString();\n    \n    normalized.push({ json: standardized });\n  }\n}\n\nreturn normalized;"
+      },
+      "id": "d5558dfe-f1c2-4076-946b-cfed4ae91078",
+      "name": "Normalize Platform Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        608,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/bot{{ $credentials.telegramApi.token }}/getFile",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "telegramApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "file_id",
+              "value": "={{ $json.media_identifier }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b33d7f38-32dc-4330-9795-ef30472ee26c",
+      "name": "Telegram Get File Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1664,
+        336
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "ztKG5bDof5XKhIbF",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/file/bot{{ $credentials.telegramApi.token }}/{{ $json.result.file_path }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "telegramApi",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "da83f85b-c695-402d-86d2-636ae2ac1d98",
+      "name": "Telegram Download File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1856,
+        336
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "ztKG5bDof5XKhIbF",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.media_identifier }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "35c665f9-82bc-4245-b013-4d2221cef23a",
+      "name": "Discord Download Direct",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        1664,
+        736
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "b64a56a7-706e-4281-b2ca-2f72d37507f5",
+      "name": "Merge With Original Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        2064,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://127.0.0.1:8000/predict",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {},
+            {},
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "id": "07d8deee-bc1c-4d87-a8f1-b416fa906a31",
+      "name": "AI Image Detection",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        2288,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const items = $input.all();\nconst results = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const original = items[i].json;\n  const detection = items[items.length - 1].json; // Last item has detection results\n  \n  const isImageDetection = original.media_type === 'image';\n  \n  // Extract confidence score\n  const confidence = detection.confidence_score || detection.confidence || 0;\n  const isFake = detection.is_ai_generated || detection.is_deepfake || false;\n  \n  // Risk classification\n  let riskLevel, riskEmoji, riskColor;\n  if (confidence >= 0.8) {\n    riskLevel = 'HIGH';\n    riskEmoji = '🚨';\n    riskColor = '#FF0000';\n  } else if (confidence >= 0.6) {\n    riskLevel = 'MEDIUM';\n    riskEmoji = '⚠️';\n    riskColor = '#FFA500';\n  } else {\n    riskLevel = 'LOW';\n    riskEmoji = '✅';\n    riskColor = '#00FF00';\n  }\n  \n  // Get indicators\n  const indicators = detection.indicators || detection.manipulation_types_detected || [];\n  \n  results.push({\n    json: {\n      // Original context\n      platform: original.platform,\n      user_id: original.user_id,\n      chat_id: original.chat_id,\n      username: original.username,\n      processing_id: original.processing_id,\n      message_id: original.message_id,\n      \n      // Detection results\n      media_type: original.media_type,\n      detection_type: isImageDetection ? 'AI Generation' : 'Deepfake',\n      is_fake: isFake,\n      confidence_score: confidence,\n      confidence_percentage: `${(confidence * 100).toFixed(1)}%`,\n      \n      // Risk assessment\n      risk_level: riskLevel,\n      risk_emoji: riskEmoji,\n      risk_color: riskColor,\n      requires_alert: confidence >= 0.75,\n      \n      // Technical details\n      indicators: indicators,\n      model_version: detection.model_version || 'unknown',\n      processing_time: detection.processing_time_ms || 0,\n      \n      // Timestamp\n      analyzed_at: new Date().toISOString()\n    },\n    binary: items[i].binary\n  });\n}\n\nreturn results;"
+      },
+      "id": "2dc8f796-6b43-4882-b500-93c1fbcce6c0",
+      "name": "Process Detection Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        2512,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const data = $input.first().json;\n\n// Generate detailed report\nconst reportText = `╔══════════════════════════════════════╗\n║   AI/DEEPFAKE DETECTION REPORT      ║\n╚══════════════════════════════════════╝\n\n${data.risk_emoji} RISK LEVEL: ${data.risk_level}\n\n📊 ANALYSIS RESULTS:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n• Media Type: ${data.media_type.toUpperCase()}\n• Detection Type: ${data.detection_type}\n• Confidence Score: ${data.confidence_percentage}\n• Status: ${data.is_fake ? 'POTENTIALLY FAKE' : 'LIKELY AUTHENTIC'}\n\n🔍 TECHNICAL INDICATORS:\n${data.indicators.map((ind, i) => `  ${i + 1}. ${ind.replace(/_/g, ' ')}`).join('\\n')}\n\n⚙️ ANALYSIS METADATA:\n• Model Version: ${data.model_version}\n• Processing Time: ${data.processing_time}ms\n• Analysis ID: ${data.processing_id}\n• Timestamp: ${data.analyzed_at}\n\n${data.requires_alert ? `⚠️ WARNING: This content shows HIGH probability of being synthetic or manipulated.\nRecommendation: Verify source before sharing or taking action.` : `✅ This content appears to be authentic with LOW suspicion of manipulation.`}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nReport generated by AI Detection Bot`;\n\nconst alertMessage = data.requires_alert ? \n  `🚨 ALERT: Potential ${data.detection_type} detected with ${data.confidence_percentage} confidence!` : \n  null;\n\nreturn [{\n  json: {\n    ...data,\n    report_text: reportText.trim(),\n    alert_message: alertMessage\n  },\n  binary: $binary\n}];"
+      },
+      "id": "f039d3ab-bad1-40a8-a4af-f08f7797aaac",
+      "name": "Generate Report",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        2928,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.requires_alert }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "74d39c5d-3480-45e7-a751-f1e8005823ab",
+      "name": "Should Send Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2720,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.report_text }}",
+        "additionalFields": {
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "e134703d-b02d-4e98-b5c5-c20b446b5e53",
+      "name": "Telegram Send Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        3360,
+        320
+      ],
+      "webhookId": "a958a8a1-4cc9-4180-8610-c354988e5f81",
+      "credentials": {
+        "telegramApi": {
+          "id": "ztKG5bDof5XKhIbF",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": \"{{ $json.report_text }}\",\n  \"username\": \"AI Detection Bot\"\n}",
+        "options": {}
+      },
+      "id": "8ff97b9c-ebcd-48e2-9b01-3038ee03a7b2",
+      "name": "Discord Send Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        3360,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.media_type }}",
+              "value2": "image"
+            }
+          ]
+        }
+      },
+      "id": "063f2fb4-73b9-40b0-af94-a95e9a89b93d",
+      "name": "is image?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        816,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "79fb6c02-4265-4dd8-81e3-e3a5dd5e2801",
+              "leftValue": "={{ $json.media_type}} }}",
+              "rightValue": "photo",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1024,
+        544
+      ],
+      "id": "f42c5718-9cbc-412c-a1cf-32682d108030",
+      "name": "is photo?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e4d008e1-f03a-4167-aa32-64f7044f8826",
+              "leftValue": "{{json.media_type}}",
+              "rightValue": "sticker",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        544
+      ],
+      "id": "4cdfdcf5-683f-47a1-857b-bc8fca9622af",
+      "name": "is sticker?"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "{{json.platform}}",
+                    "rightValue": "Telegram",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "2a12ad21-1832-4353-889c-6d8d5d0d495e"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Telegram"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e02e8df5-ef77-4f4b-8960-1a95adb31860",
+                    "leftValue": "={{json.platform}}",
+                    "rightValue": "WhatsApp",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "WhatsApp"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c18e3391-2180-434e-9373-b87896567176",
+                    "leftValue": "={{json.platform}}",
+                    "rightValue": "Discord",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Discord"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        1408,
+        528
+      ],
+      "id": "444edb55-03de-4e77-852b-cebedce1c2ef",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "{{json.platform}}",
+                    "rightValue": "Telegram",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "2a12ad21-1832-4353-889c-6d8d5d0d495e"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Telegram"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e02e8df5-ef77-4f4b-8960-1a95adb31860",
+                    "leftValue": "={{json.platform}}",
+                    "rightValue": "WhatsApp",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "WhatsApp"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c18e3391-2180-434e-9373-b87896567176",
+                    "leftValue": "={{json.platform}}",
+                    "rightValue": "Discord",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Discord"
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        3120,
+        528
+      ],
+      "id": "3cc39c6f-db3f-4c19-bbbd-cb2f82164f55",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discordapp.com/api/webhooks/1447020677256183819/C0dy5HKH5ax5CJGjRDa2aZ8ypQDns06UaV_Z4xEwPtTc7H8zGDJKpwBmM2eHzOQGE4eJ",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "json",
+              "value": "content"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        384,
+        768
+      ],
+      "id": "8c601330-0fcb-40a1-93a0-3a4ce461744a",
+      "name": "Discord Webhook"
+    }
+  ],
+  "pinData": {
+    "Telegram Trigger": [
+      {
+        "json": {
+          "update_id": 259097703,
+          "message": {
+            "message_id": 1,
+            "from": {
+              "id": 6803965005,
+              "is_bot": false,
+              "first_name": "Navadheep",
+              "last_name": "G p",
+              "username": "Navadheepnavu",
+              "language_code": "en"
+            },
+            "chat": {
+              "id": 6803965005,
+              "first_name": "Navadheep",
+              "last_name": "G p",
+              "username": "Navadheepnavu",
+              "type": "private"
+            },
+            "date": 1765064665,
+            "text": "/start",
+            "entities": [
+              {
+                "offset": 0,
+                "length": 6,
+                "type": "bot_command"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Platform Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Platform Data": {
+      "main": [
+        [
+          {
+            "node": "is image?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Get File Info": {
+      "main": [
+        [
+          {
+            "node": "Telegram Download File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Download File": {
+      "main": [
+        [
+          {
+            "node": "Merge With Original Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord Download Direct": {
+      "main": [
+        [
+          {
+            "node": "Merge With Original Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge With Original Data": {
+      "main": [
+        [
+          {
+            "node": "AI Image Detection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Image Detection": {
+      "main": [
+        [
+          {
+            "node": "Process Detection Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Detection Results": {
+      "main": [
+        [
+          {
+            "node": "Should Send Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Report": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Send Alert?": {
+      "main": [
+        [
+          {
+            "node": "Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "is image?": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "is photo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "is photo?": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "is sticker?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "is sticker?": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Telegram Get File Info",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [],
+        [
+          {
+            "node": "Discord Download Direct",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Platform Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "Telegram Send Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [],
+        [
+          {
+            "node": "Discord Send Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e1139b3e-0986-44a3-9809-cc8da79b0457",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "59552934286e9421320993eec41ae6c6bf540968962c9b29e854c5f793dd2780"
+  },
+  "id": "w0xgCLMMDTO1L35A",
+  "tags": []
+}

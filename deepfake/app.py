@@ -1,58 +1,83 @@
-from fastapi import FastAPI, UploadFile, File
-import uvicorn
-import cv2
-import numpy as np
+from flask import Flask, render_template, request, jsonify
+import torch
+import torch.nn as nn
+from torchvision.models import mobilenet_v2
+from torchvision import transforms
+from PIL import Image
 import json
-import tensorflow as tf
-import tempfile
 import os
+from flask_cors import CORS
 
-app = FastAPI()
+app = Flask(__name__)
+CORS(app)
 
-# Load model
-MODEL_PATH = "model.keras"   # CHANGE this to your real filename
-model = tf.keras.models.load_model(MODEL_PATH)
+# ------------------------------------------------------------
+# Load Class Labels
+# ------------------------------------------------------------
 
-# Load index map
-with open("classifier_indices.json", "r") as f:
-    index_map = json.load(f)
+CLASSES_PATH = os.path.join(os.path.dirname(__file__), "classes.json")
 
-@app.post("/predict")
-async def predict(file: UploadFile = File(...)):
-    # Save uploaded file temporarily
-    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-    temp.write(await file.read())
-    temp.close()
+with open(CLASSES_PATH, "r") as f:
+    classes = json.load(f)
 
-    # Read video
-    cap = cv2.VideoCapture(temp.name)
-    predictions = []
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+# ------------------------------------------------------------
+# Load MobileNetV2 Model (✓ matches your best_model.pth)
+# ------------------------------------------------------------
 
-        frame = cv2.resize(frame, (224, 224))
-        frame = frame / 255.0
-        frame = np.expand_dims(frame, axis=0)
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "best_model.pth")
 
-        pred = model.predict(frame)[0]
-        predictions.append(pred)
+model = mobilenet_v2(weights=None)
+model.classifier[1] = nn.Linear(1280, len(classes))
 
-    cap.release()
-    os.remove(temp.name)
+state = torch.load(MODEL_PATH, map_location="cpu")
+model.load_state_dict(state)
+model.eval()
 
-    # Average prediction across frames
-    avg_pred = np.mean(predictions, axis=0)
+# ------------------------------------------------------------
+# Image Preprocessing (matches MobileNetV2 training)
+# ------------------------------------------------------------
 
-    # Convert to JSON
-    results = {
-        "class_probabilities": {index_map[str(i)]: float(avg_pred[i]) for i in range(len(avg_pred))},
-        "predicted_class": index_map[str(np.argmax(avg_pred))]
-    }
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+])
 
-    return results
+
+# ------------------------------------------------------------
+# Routes
+# ------------------------------------------------------------
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+
+@app.route("/predict", methods=["POST"])
+def predict():
+    if "image" not in request.files:
+        return jsonify({"error": "No image found"}), 400
+
+    file = request.files["image"]
+
+    try:
+        image = Image.open(file).convert("RGB")
+    except:
+        return jsonify({"error": "Invalid image"}), 400
+
+    tensor = transform(image).unsqueeze(0)
+
+    with torch.no_grad():
+        output = model(tensor)
+        _, predicted = torch.max(output, 1)
+        label = classes[predicted.item()]
+
+    return jsonify({"prediction": label})
+
+
+# ------------------------------------------------------------
+# Run App
+# ------------------------------------------------------------
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    app.run(debug=True, host="0.0.0.0", port=5000)

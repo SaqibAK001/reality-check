@@ -1,32 +1,51 @@
-from fastapi import FastAPI, UploadFile, File
-import uvicorn
+from flask import Flask, render_template, request
 import tensorflow as tf
 import numpy as np
+import json
 from PIL import Image
-import io
-import os
 
-app = FastAPI()
+app = Flask(__name__)
 
-# Load Model
-MODEL_PATH = "ai_image_classifier.keras"
-model = tf.keras.models.load_model(MODEL_PATH)
+# Load model
+model = tf.keras.models.load_model("ai_image_classifier.keras")
 
-@app.post("/predict")
-async def predict(file: UploadFile = File(...)):
-    image_bytes = await file.read()
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    img = img.resize((224, 224))   # adjust to your model input size
-    img_array = np.array(img) / 255.0
-    img_array = np.expand_dims(img_array, axis=0)
+# Load classifier indices JSON
+with open("classifier_indices.json", "r") as f:
+    class_indices = json.load(f)
 
-    prediction = model.predict(img_array)
-    score = float(prediction[0][0])
+# Reverse mapping (0→FAKE, 1→REAL)
+index_to_class = {v: k for k, v in class_indices.items()}
 
-    return {
-        "ai_generated_probability": score,
-        "is_ai_generated": score > 0.5
-    }
+
+def preprocess(img):
+    img = img.resize((224, 224))
+    img = np.array(img).astype("float32") / 255.0
+    img = np.expand_dims(img, axis=0)
+    return img
+
+
+@app.route("/", methods=["GET", "POST"])
+def home():
+    result = None
+
+    if request.method == "POST":
+        file = request.files.get("image")
+        if file:
+            try:
+                img = Image.open(file.stream).convert("RGB")
+                x = preprocess(img)
+
+                pred = model.predict(x)[0]
+                class_id = int(np.argmax(pred))
+                confidence = float(np.max(pred)) * 100
+
+                result = f"{index_to_class[class_id]} ({confidence:.2f}% confidence)"
+
+            except Exception as e:
+                result = f"Error: {str(e)}"
+
+    return render_template("index.html", prediction=result)
+
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+    app.run(debug=True)
